@@ -3,6 +3,10 @@
 
 #include <Arduino.h>
 
+class SimpleESPNowPeer {
+
+};
+
 class SimpleESPNow {
  public:
  private:
