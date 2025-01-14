@@ -13,7 +13,7 @@ class SimpleESPNowPeer {
     uint32_t            lastSeen = 0;
  private:
 };
-
+   
 class SimpleESPPlatformMsg {
  public:
     uint8_t             mac[6];

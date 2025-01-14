@@ -155,23 +155,23 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     if (data[MSG_HEADER_ID_TYPE] == ACK_MSG) {
         // ACK
         for (auto msg : messages) {
-            DBGLOG(Debug, "  ACK received for %02X:%02X, checking %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1],
-                msg->data[MSG_HEADER_ID_NUM1], msg->data[MSG_HEADER_ID_NUM2]);
+//            DBGLOG(Debug, "  ACK received for %02X:%02X, checking %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1],
+//                msg->data[MSG_HEADER_ID_NUM1], msg->data[MSG_HEADER_ID_NUM2]);
 
             if (msg->data[MSG_HEADER_ID_NUM1] == data[EXTRA_HEADER_LENGTH] && msg->data[MSG_HEADER_ID_NUM2] == data[EXTRA_HEADER_LENGTH+1]) {
                 msg->waitingForAck = false;
-                DBGLOG(Verbose, "ACK received for %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
+//                DBGLOG(Verbose, "ACK received for %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
                 messages.erase(std::remove(messages.begin(), messages.end(), msg), messages.end());
                 delete msg;
                 return;
             }
         }
-        DBGLOG(Verbose, "ACK received for unknown message %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
+//        DBGLOG(Verbose, "ACK received for unknown message %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
         return;
     }
     // Auto ACK
     if (data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK) {
-        DBGLOG(Verbose, "ACK requested, sending for MessageID %02X %02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
+//        DBGLOG(Verbose, "ACK requested, sending for MessageID %02X %02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
         // ACK Request
         uint8_t ackData[EXTRA_HEADER_LENGTH+2];
         ackData[MSG_HEADER_ID_TYPE] = ACK_MSG;
@@ -180,15 +180,16 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         _send(macAddr, ackData, EXTRA_HEADER_LENGTH+2);
     }
     if (!peerHasKnownName(macAddr)) {
-        DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+//        DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         sendNameRequest(macAddr);
     }
     if (data[MSG_HEADER_ID_TYPE] == PONG_MSG) {
-        DBGLOG(Verbose, "Pong Message received from %s", peer->name);
+//        DBGLOG(Verbose, "Pong Message received from %s", peer->name);
         bIsSystemMessage = true;
+        return;
     }
     if (data[MSG_HEADER_ID_TYPE] == PING_MSG) {
-        DBGLOG(Verbose, "Ping Message received from %s", peer->name);
+//        DBGLOG(Verbose, "Ping Message received from %s", peer->name);
         // Ping
         uint8_t sendBuf[EXTRA_HEADER_LENGTH];
         sendBuf[MSG_HEADER_ID_TYPE] = PONG_MSG;
@@ -197,7 +198,7 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_REQUEST_MSG) {
-        DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
+//        DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
         // Name Request
         uint8_t sendBuf[EXTRA_HEADER_LENGTH+10];
         sendBuf[MSG_HEADER_ID_TYPE] = NAME_RESPONSE_MSG;
@@ -207,13 +208,13 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_RESPONSE_MSG) {
-        DBGLOG(Verbose, "Name Response Message received from %s", peer->name);
+//        DBGLOG(Verbose, "Name Response Message received from %s", peer->name);
         // Name Response
         memcpy(peer->name, data+EXTRA_HEADER_LENGTH, 10);
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == TIME_SYNC_MSG) {
-        DBGLOG(Verbose, "Time Sync Message received from %s", peer->name);
+//        DBGLOG(Verbose, "Time Sync Message received from %s", peer->name);
         // Time Sync
         uint32_t time = data[EXTRA_HEADER_LENGTH] | (data[EXTRA_HEADER_LENGTH+1] << 8) | (data[EXTRA_HEADER_LENGTH+2] << 16) | (data[EXTRA_HEADER_LENGTH+3] << 24);
         uint32_t now = ::millis();
@@ -249,7 +250,7 @@ bool
 SimpleESPNow::peerHasKnownName(const uint8_t *mac) {
     for (auto peer : peers) {
         if (memcmp(peer->mac, mac, 6) == 0) {
-            DBGLOG(Verbose, "Peer %02X:%02X:%02X:%02X:%02X:%02X has name %s", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], peer->name);
+//            DBGLOG(Verbose, "Peer %02X:%02X:%02X:%02X:%02X:%02X has name %s", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], peer->name);
             return strlen(peer->name) > 0;
         }
     }
@@ -308,7 +309,7 @@ SimpleESPNow::_sendFromQueue() {
 
 uint16_t
 SimpleESPNow::_send(const uint8_t *mac, const uint8_t *data, int dataLen) {
-    DBGLOG(Verbose, "Sending %d bytes to %02X:%02X:%02X:%02X:%02X:%02X", dataLen, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+//    DBGLOG(Verbose, "Sending %d bytes to %02X:%02X:%02X:%02X:%02X:%02X", dataLen, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     SimpleESPPlatformMsg *msg = new SimpleESPPlatformMsg();
     memcpy(msg->mac, mac, 6);
     memcpy(msg->data, data, dataLen);
@@ -353,7 +354,7 @@ SimpleESPNow::sendTimeSync() {
     sendBuf[EXTRA_HEADER_LENGTH+1] = (time >> 8) & 0xFF;
     sendBuf[EXTRA_HEADER_LENGTH+2] = (time >> 16) & 0xFF;
     sendBuf[EXTRA_HEADER_LENGTH+3] = (time >> 24) & 0xFF;
-    DBGLOG(Verbose, "Broadcasting time: %d", time);
+//    DBGLOG(Verbose, "Broadcasting time: %d", time);
     _send(broadcast.mac, sendBuf, EXTRA_HEADER_LENGTH+4);
 }
 
@@ -370,10 +371,10 @@ SimpleESPNow::checkPeers() {
     for (auto peer : peers) {
         if (::millis() - peer->lastSeen > 20000) {
             DBGLOG(Verbose, "Peer %s not seen for 20 seconds, removing!", peer->name);
+            peers.erase(std::remove(peers.begin(), peers.end(), peer), peers.end());
         } else  if (::millis() - peer->lastSeen > 10000) {
             DBGLOG(Verbose, "Peer %s not seen for 10 seconds, sending Ping", peer->name);
             sendPing(peer);
-
         }
     }
 }
