@@ -2,6 +2,10 @@
 #include "esp_wifi.h"
 #include <esp_now.h>
 
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 1)
+#include "esp_mac.h"
+#endif
+
 #define ESP32DEBUGGING
 #include "esp32logger.h"
 
@@ -127,7 +131,7 @@ void SimpleESPNowRecvCallback(const unsigned char *macAddr, const unsigned char 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 1)
 void
 SimpleESPNow::RecvCallback(const esp_now_recv_info_t * esp_now_info, const uint8_t *data, int dataLen) {
-    unsigned char macAddr = esp_now_info.src_addr;
+    unsigned char *macAddr = esp_now_info->src_addr;
 #else
 void
 SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, int dataLen) {
@@ -136,9 +140,11 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     // Check, if peer exists
     SimpleESPNowPeer *peer = getPeer(macAddr);
     if (peer == nullptr) {
+        DBGLOG(Verbose, "New peer detected");
         peer = addPeer(macAddr);
     }
     if (dataLen < EXTRA_HEADER_LENGTH) {
+        DBGLOG(Error, "Invalid message length");
         // Error, BasisInfo fehlt
         return;
     }
@@ -158,6 +164,7 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     }
     // Auto ACK
     if (data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK) {
+        DBGLOG(Verbose, "ACK requested");
         // ACK Request
         uint8_t ackData[EXTRA_HEADER_LENGTH];
         ackData[MSG_HEADER_ID_TYPE] = ACK_MSG;
@@ -165,7 +172,12 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         ackData[MSG_HEADER_ID_NUM2] = data[MSG_HEADER_ID_NUM2];
         _send(macAddr, ackData, EXTRA_HEADER_LENGTH);
     }
+    if (!peerHasKnownName(macAddr)) {
+        DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        sendNameRequest(macAddr);
+    }
     if (data[MSG_HEADER_ID_TYPE] == NAME_REQUEST_MSG) {
+        DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
         // Name Request
         uint8_t sendBuf[EXTRA_HEADER_LENGTH+10];
         sendBuf[MSG_HEADER_ID_TYPE] = NAME_RESPONSE_MSG;
@@ -175,14 +187,16 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_RESPONSE_MSG) {
+        DBGLOG(Verbose, "Name Response Message received from %s", peer->name);
         // Name Response
         memcpy(peer->name, data+EXTRA_HEADER_LENGTH, 10);
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == TIME_SYNC_MSG) {
+        DBGLOG(Verbose, "Time Sync Message received from %s", peer->name);
         // Time Sync
         uint32_t time = data[EXTRA_HEADER_LENGTH] | (data[EXTRA_HEADER_LENGTH+1] << 8) | (data[EXTRA_HEADER_LENGTH+2] << 16) | (data[EXTRA_HEADER_LENGTH+3] << 24);
-        uint32_t now = millis();
+        uint32_t now = ::millis();
         timeOffset = time - now;
         timeSynced = true;
         lastTimeSync = now;
@@ -192,9 +206,6 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     // Transfer message to class callback
     if (!bIsSystemMessage && onReceive != nullptr) {
         onReceive(peer, data+EXTRA_HEADER_LENGTH, dataLen-EXTRA_HEADER_LENGTH);
-    }
-    if (!peerHasKnownName(macAddr)) {
-        sendNameRequest(macAddr);
     }
 }
 
@@ -218,7 +229,8 @@ bool
 SimpleESPNow::peerHasKnownName(const uint8_t *mac) {
     for (auto peer : peers) {
         if (memcmp(peer->mac, mac, 6) == 0) {
-            return true;
+            DBGLOG(Verbose, "Peer %02X:%02X:%02X:%02X:%02X:%02X has name %s", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], peer->name);
+            return strlen(peer->name) > 0;
         }
     }
     return false;
@@ -304,7 +316,7 @@ void
 SimpleESPNow::sendTimeSync() {
 
     uint8_t sendBuf[EXTRA_HEADER_LENGTH+4];
-    uint32_t time = millis();
+    uint32_t time = ::millis();
     timeOffset = 0;             // Setzen auf 0, da Master
     timeSynced = true;
     isTimeSyncMaster = true;
@@ -326,16 +338,16 @@ SimpleESPNow::checkTimeSync() {
  //       sendTimeSync();
 //    return;
     if (isTimeSyncMaster) {
-        if (millis() - lastTimeSync > 4000) {
+        if (::millis() - lastTimeSync > 4000) {
             sendTimeSync();
         }
     } else {
     if (!timeSynced) {  // Wenn nach 5 Sekunden keiner den Sync übernommen hat, dann startet dieser Client
-        if (millis() - lastTimeSync > 5000 + random(300)) {
+        if (::millis() - lastTimeSync > 5000 + random(300)) {
             sendTimeSync();
         }
     } else {
-        if (millis() - lastTimeSync > (60000 + random(500))) {  // War mal gesynct, aber es kam nichts mehr. Dann übernehmen
+        if (::millis() - lastTimeSync > (60000 + random(500))) {  // War mal gesynct, aber es kam nichts mehr. Dann übernehmen
             sendTimeSync();
         }
     }

@@ -9,7 +9,7 @@
 class SimpleESPNowPeer {
  public:
     uint8_t             mac[6] = {0, 0, 0, 0, 0, 0};
-    char                name[10] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0'};
+    char                name[16] = {'\0'};
  private:
 };
 
