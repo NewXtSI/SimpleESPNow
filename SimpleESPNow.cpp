@@ -101,6 +101,7 @@ SimpleESPNow::begin() {
             vTaskDelay(1);
             if (syncCheck % 1000 == 0) {
                 self->checkTimeSync();
+                self->checkPeers();
             }
             syncCheck++;
         }
@@ -148,6 +149,7 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         // Error, BasisInfo fehlt
         return;
     }
+    peer->lastSeen = ::millis();
     // Check, if is system message
     // First, check for ACKs
     if (data[MSG_HEADER_ID_TYPE] == ACK_MSG) {
@@ -175,6 +177,15 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     if (!peerHasKnownName(macAddr)) {
         DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         sendNameRequest(macAddr);
+    }
+    if (data[MSG_HEADER_ID_TYPE] == PING_MSG) {
+        DBGLOG(Verbose, "Ping Message received from %s", peer->name);
+        // Ping
+        uint8_t sendBuf[EXTRA_HEADER_LENGTH];
+        sendBuf[MSG_HEADER_ID_TYPE] = PONG_MSG;
+        sendBuf[MSG_HEADER_ID_FLAGS] = MSG_FLAG_SEND_QOS;
+        _send(macAddr, sendBuf, EXTRA_HEADER_LENGTH);
+        return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_REQUEST_MSG) {
         DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
@@ -330,6 +341,27 @@ SimpleESPNow::sendTimeSync() {
     sendBuf[EXTRA_HEADER_LENGTH+3] = (time >> 24) & 0xFF;
     DBGLOG(Verbose, "Broadcasting time: %d", time);
     _send(broadcast.mac, sendBuf, EXTRA_HEADER_LENGTH+4);
+}
+
+void
+SimpleESPNow::sendPing(SimpleESPNowPeer *peer) {
+    uint8_t sendBuf[EXTRA_HEADER_LENGTH];
+    sendBuf[MSG_HEADER_ID_TYPE] = PING_MSG;
+    sendBuf[MSG_HEADER_ID_FLAGS] = MSG_FLAG_SEND_QOS;
+    _send(peer->mac, sendBuf, EXTRA_HEADER_LENGTH);
+}
+
+void
+SimpleESPNow::checkPeers() {
+    for (auto peer : peers) {
+        if (::millis() - peer->lastSeen > 20000) {
+            DBGLOG(Verbose, "Peer %s not seen for 20 seconds, removing!", peer->name);
+        } else  if (::millis() - peer->lastSeen > 10000) {
+            DBGLOG(Verbose, "Peer %s not seen for 10 seconds, sending Ping", peer->name);
+            sendPing(peer);
+
+        }
+    }
 }
 
 void

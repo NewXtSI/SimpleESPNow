@@ -10,6 +10,7 @@ class SimpleESPNowPeer {
  public:
     uint8_t             mac[6] = {0, 0, 0, 0, 0, 0};
     char                name[16] = {'\0'};
+    uint32_t            lastSeen = 0;
  private:
 };
 
@@ -78,7 +79,9 @@ class SimpleESPNow {
     bool                isTimeSyncMaster = false;
     uint32_t            lastTimeSync = 0;
 
+    void                sendPing(SimpleESPNowPeer *peer);
     void                checkTimeSync();
+    void                checkPeers();      
 };
 
 extern SimpleESPNow simpleESPNow;
