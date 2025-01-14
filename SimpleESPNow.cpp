@@ -157,16 +157,18 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         for (auto msg : messages) {
             if (msg->data[MSG_HEADER_ID_NUM1] == data[MSG_HEADER_ID_NUM1] && msg->data[MSG_HEADER_ID_NUM2] == data[MSG_HEADER_ID_NUM2]) {
                 msg->waitingForAck = false;
+                DBGLOG(Verbose, "ACK received for %02X:%02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
                 messages.erase(std::remove(messages.begin(), messages.end(), msg), messages.end());
                 delete msg;
-                break;
+                return;
             }
         }
+        DBGLOG(Verbose, "ACK received for unknown message %02X:%02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
         return;
     }
     // Auto ACK
     if (data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK) {
-        DBGLOG(Verbose, "ACK requested");
+        DBGLOG(Verbose, "ACK requested, sending for MessageID %02X %02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
         // ACK Request
         uint8_t ackData[EXTRA_HEADER_LENGTH];
         ackData[MSG_HEADER_ID_TYPE] = ACK_MSG;
@@ -177,6 +179,10 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     if (!peerHasKnownName(macAddr)) {
         DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         sendNameRequest(macAddr);
+    }
+    if (data[MSG_HEADER_ID_TYPE] == PONG_MSG) {
+        DBGLOG(Verbose, "Pong Message received from %s", peer->name);
+        bIsSystemMessage = true;
     }
     if (data[MSG_HEADER_ID_TYPE] == PING_MSG) {
         DBGLOG(Verbose, "Ping Message received from %s", peer->name);
@@ -253,7 +259,7 @@ SimpleESPNow::SendCallback(const unsigned char *macAddr, esp_now_send_status_t s
         return;
     }
     SimpleESPPlatformMsg *msg = messages[0];
-    messages.erase(messages.begin());
+    messages.erase(std::remove(messages.begin(), messages.end(), msg), messages.end());
     if (status != ESP_NOW_SEND_SUCCESS) {
         if ((msg->data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_SEND_QOS) || (msg->data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK)) {
             // Resend, aber als letztes
