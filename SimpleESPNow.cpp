@@ -155,15 +155,18 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     if (data[MSG_HEADER_ID_TYPE] == ACK_MSG) {
         // ACK
         for (auto msg : messages) {
+            DBGLOG(Debug, "  ACK received for %02X:%02X, checking %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1],
+                msg->data[MSG_HEADER_ID_NUM1], msg->data[MSG_HEADER_ID_NUM2]);
+
             if (msg->data[MSG_HEADER_ID_NUM1] == data[EXTRA_HEADER_LENGTH] && msg->data[MSG_HEADER_ID_NUM2] == data[EXTRA_HEADER_LENGTH+1]) {
                 msg->waitingForAck = false;
-                DBGLOG(Verbose, "ACK received for %02X:%02X", data[EXTRA_HEADER_LENGTH+1], data[EXTRA_HEADER_LENGTH+1]);
+                DBGLOG(Verbose, "ACK received for %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
                 messages.erase(std::remove(messages.begin(), messages.end(), msg), messages.end());
                 delete msg;
                 return;
             }
         }
-        DBGLOG(Verbose, "ACK received for unknown message %02X:%02X", data[MSG_HEADER_ID_NUM1], data[MSG_HEADER_ID_NUM2]);
+        DBGLOG(Verbose, "ACK received for unknown message %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
         return;
     }
     // Auto ACK
@@ -290,6 +293,9 @@ SimpleESPNow::_sendFromQueue() {
         return;
     }
     SimpleESPPlatformMsg *msg = messages[0];
+    if (msg->timeStamp > this->millis()) {
+        return;
+    }
     esp_now_peer_info_t peerInfo = {};
     memcpy(&peerInfo.peer_addr, msg->mac, 6);
     if (!esp_now_is_peer_exist(msg->mac)) {
@@ -297,6 +303,7 @@ SimpleESPNow::_sendFromQueue() {
     }
     isSending = true;
     esp_err_t result = esp_now_send(msg->mac, msg->data, msg->dataLen);
+    msg->timeStamp = this->millis()+100;        // Resend offset!
 }
 
 uint16_t
