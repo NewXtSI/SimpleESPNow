@@ -11,6 +11,11 @@
 
 #define EXTRA_HEADER_LENGTH 4
 
+#define DEBUG_ON 0
+#define DEBUG_OFF 1
+
+#define DEBUG_RAW_PACKETS DEBUG_ON
+
 // Internal data messagetypes
 #define SYSTEM_MESSAGE      0x00
 #define PING_MSG            0x01
@@ -92,7 +97,15 @@ SimpleESPNow::begin() {
         return;
     }
     DBGLOG(Verbose, "Starting SimpleESPNow");
-    xTaskCreate([](void *arg) {
+#ifdef BOARD_HAS_PSRkjkjkjkjAM
+    StaticTask_t xTaskBuffer;
+    StackType_t *xStack;
+    xStack = (StackType_t*)ps_malloc(1024*8);
+    if (xStack == nullptr) {
+        DBGLOG(Error, "Error allocating stack");
+        return;
+    }
+    xTaskCreateStatic([](void *arg) {
         SimpleESPNow *self = (SimpleESPNow*)arg;
         uint32_t syncCheck = 0;
         DBGLOG(Verbose, "SimpleESPNow Task started");
@@ -105,7 +118,35 @@ SimpleESPNow::begin() {
             }
             syncCheck++;
         }
-    }, "SimpleESPNow", 4096, this, 3, NULL);
+    }, "SimpleESPNow", 1024*4, this, 3, xStack, &xTaskBuffer);
+#else
+    TaskHandle_t espNowTask = nullptr;
+    xTaskCreate([](void *arg) {
+        SimpleESPNow *self = (SimpleESPNow*)arg;
+        uint32_t syncCheck = 0;
+        DBGLOG(Verbose, "SimpleESPNow Task started");
+        uint32_t uxWaterMark = uxTaskGetStackHighWaterMark(nullptr);
+        DBGLOG(Warning, "ESPNowTask - Stack watermark: %d",uxWaterMark);
+        DBGLOG(Warning, "Free heap: %d", ESP.getFreeHeap());
+        
+        while (true) {
+            self->_sendFromQueue();
+            vTaskDelay(1);
+            if (syncCheck % 1000 == 0) {
+                self->checkTimeSync();
+                self->checkPeers();
+            }
+            syncCheck++;
+            if (uxTaskGetStackHighWaterMark(nullptr) < uxWaterMark) {
+                uxWaterMark = uxTaskGetStackHighWaterMark(nullptr);
+                DBGLOG(Warning, "ESPNowTask - Stack watermark: %d",uxWaterMark);
+            }
+        }
+    }, "SimpleESPNow", 1900, this, 4, &espNowTask);
+    if (espNowTask == nullptr) {
+        DBGLOG(Error, "Error creating SimpleESPNow Task");
+    }
+#endif    
 }
 
 #define ESPNOW_WIFI_MODE    WIFI_MODE_STA
@@ -137,6 +178,16 @@ SimpleESPNow::RecvCallback(const esp_now_recv_info_t * esp_now_info, const uint8
 void
 SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, int dataLen) {
 #endif
+#if (DEBUG_RAW_PACKETS == DEBUG_ON)
+        char str[255];
+        for (int i=0;i<dataLen;i++) {
+            sprintf(str+i*3, "%02X ", data[i]);
+        }
+        DBGCHK(Verbose, DEBUG_RAW_PACKETS, "IN  -> %02X:%02X:%02X:%02X:%02X:%02X -> %s",
+            macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], str);
+#endif
+
+
     bool bIsSystemMessage = false;
     // Check, if peer exists
     SimpleESPNowPeer *peer = getPeer(macAddr);
@@ -154,13 +205,16 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
     // First, check for ACKs
     if (data[MSG_HEADER_ID_TYPE] == ACK_MSG) {
         // ACK
+        if (messages.size() == 0) {
+            return;
+        }
         for (auto msg : messages) {
 //            DBGLOG(Debug, "  ACK received for %02X:%02X, checking %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1],
 //                msg->data[MSG_HEADER_ID_NUM1], msg->data[MSG_HEADER_ID_NUM2]);
 
             if (msg->data[MSG_HEADER_ID_NUM1] == data[EXTRA_HEADER_LENGTH] && msg->data[MSG_HEADER_ID_NUM2] == data[EXTRA_HEADER_LENGTH+1]) {
                 msg->waitingForAck = false;
-//                DBGLOG(Verbose, "ACK received for %02X:%02X", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
+                DBGLOG(Verbose, "ACK received for %02X:%02X, removing", data[EXTRA_HEADER_LENGTH], data[EXTRA_HEADER_LENGTH+1]);
                 messages.erase(std::remove(messages.begin(), messages.end(), msg), messages.end());
                 delete msg;
                 return;
@@ -180,7 +234,7 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         _send(macAddr, ackData, EXTRA_HEADER_LENGTH+2);
     }
     if (!peerHasKnownName(macAddr)) {
-//        DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        DBGLOG(Verbose, "Requesting name from %02X:%02X:%02X:%02X:%02X:%02X", macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         sendNameRequest(macAddr);
     }
     if (data[MSG_HEADER_ID_TYPE] == PONG_MSG) {
@@ -198,7 +252,7 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_REQUEST_MSG) {
-//        DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
+        DBGLOG(Verbose, "Name Request Message received from %s", peer->name);
         // Name Request
         uint8_t sendBuf[EXTRA_HEADER_LENGTH+10];
         sendBuf[MSG_HEADER_ID_TYPE] = NAME_RESPONSE_MSG;
@@ -208,9 +262,9 @@ SimpleESPNow::RecvCallback(const unsigned char *macAddr, const uint8_t *data, in
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == NAME_RESPONSE_MSG) {
-//        DBGLOG(Verbose, "Name Response Message received from %s", peer->name);
-        // Name Response
         memcpy(peer->name, data+EXTRA_HEADER_LENGTH, 10);
+        DBGLOG(Verbose, "Name Response Message received from %s", peer->name);
+        // Name Response
         return;
     }
     if (data[MSG_HEADER_ID_TYPE] == TIME_SYNC_MSG) {
@@ -270,6 +324,7 @@ SimpleESPNow::SendCallback(const unsigned char *macAddr, esp_now_send_status_t s
             // Resend, aber als letztes
             messages.push_back(msg);
         } else {
+            DBGLOG(Warning, "Error sending message, dropping message");
             delete msg;
         }
     } else {
@@ -277,11 +332,17 @@ SimpleESPNow::SendCallback(const unsigned char *macAddr, esp_now_send_status_t s
             // Resend, aber als letztes
             messages.push_back(msg);
         } else {
-            if (msg->data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK) {
-                msg->waitingForAck = true;
-                messages.push_back(msg);
-            } else {
+            // Wenn Message-MAC nicht eigene MAC, dann löschen
+            if (memcmp(msg->mac, self.mac, 6) != 0) {
                 delete msg;
+            } else {
+                if ((msg->data[MSG_HEADER_ID_FLAGS] & MSG_FLAG_REQ_ACK)) {
+                    msg->waitingForAck = true;
+                    messages.push_back(msg);
+                } else {
+                    DBGLOG(Info, "Message sent successfully");  
+                    delete msg;
+                }
             }
         }
     }
@@ -294,7 +355,10 @@ SimpleESPNow::_sendFromQueue() {
         return;
     }
     SimpleESPPlatformMsg *msg = messages[0];
-    if (msg->timeStamp > this->millis()) {
+    if (msg->timeStamp > ::millis()) {
+        // Erste Message ans Ende verschieben
+        messages.erase(messages.begin());
+        messages.push_back(msg);
         return;
     }
     esp_now_peer_info_t peerInfo = {};
@@ -303,14 +367,42 @@ SimpleESPNow::_sendFromQueue() {
         esp_now_add_peer(&peerInfo);
     }
     isSending = true;
+#if 0    
+#if (DEBUG_RAW_PACKETS == DEBUG_ON)
+        char str[255];
+        for (int i=0;i<msg->dataLen;i++) {
+            sprintf(str+i*3, "%02X ", msg->data[i]);
+        }
+        DBGCHK(Verbose, DEBUG_RAW_PACKETS, "OUT -> %02X:%02X:%02X:%02X:%02X:%02X -> %s", 
+            msg->mac[0], msg->mac[1], msg->mac[2], msg->mac[3], msg->mac[4], msg->mac[5], str);
+#endif    
+#endif
     esp_err_t result = esp_now_send(msg->mac, msg->data, msg->dataLen);
-    msg->timeStamp = this->millis()+100;        // Resend offset!
+    msg->timeStamp = ::millis()+100;        // Resend offset!
+}
+
+void                
+SimpleESPNow::dumpQueue() {
+    int i=0;
+    for (auto msg : messages) {
+        DBGLOG(Verbose, "%3d - Message %02X:%02X to %s, Type %d", i++, msg->data[MSG_HEADER_ID_NUM1], msg->data[MSG_HEADER_ID_NUM2],
+            getPeer(msg->mac)->name, msg->data[MSG_HEADER_ID_TYPE]);
+    }
 }
 
 uint16_t
 SimpleESPNow::_send(const uint8_t *mac, const uint8_t *data, int dataLen) {
 //    DBGLOG(Verbose, "Sending %d bytes to %02X:%02X:%02X:%02X:%02X:%02X", dataLen, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    if (messages.size() > 20) {
+        DBGLOG(Error, "Too many messages in queue, dropping message");
+        dumpQueue();
+        return 0;
+    }
     SimpleESPPlatformMsg *msg = new SimpleESPPlatformMsg();
+    if (msg == nullptr) {
+        DBGLOG(Error, "Error allocating message");
+        return 0;
+    }
     memcpy(msg->mac, mac, 6);
     memcpy(msg->data, data, dataLen);
     msg->dataLen = dataLen;
@@ -318,14 +410,15 @@ SimpleESPNow::_send(const uint8_t *mac, const uint8_t *data, int dataLen) {
     msg->data[MSG_HEADER_ID_NUM1] = msgCounter & 0xFF;
     msg->data[MSG_HEADER_ID_NUM2] = (msgCounter >> 8) & 0xFF;
     msgCounter++;
-    msg->timeStamp = this->millis();
+    msg->timeStamp = ::millis();
     messages.push_back(msg);
+    dumpQueue();
     return msgCounter-1;
 }
 
 uint16_t
 SimpleESPNow::send(SimpleESPNowPeer *peer, const uint8_t *data, int dataLen, bool requestAck, bool qos) {
-    uint8_t sendBuf[ESP_NOW_MAX_DATA_LEN];
+    uint8_t sendBuf[MAX_MSG_LEN];
     memcpy(sendBuf+EXTRA_HEADER_LENGTH, data, dataLen);
     sendBuf[MSG_HEADER_ID_TYPE] = DATA_MSG;
     sendBuf[MSG_HEADER_ID_FLAGS] = 0x00;
@@ -405,7 +498,7 @@ void
 SimpleESPNow::init(char *name) {
     if (initialized)
         return;
-
+    DBGLOG(Verbose, "Initializing SimpleESPNow");
     // Fill self peer
     esp_read_mac(self.mac, ESP_MAC_WIFI_STA);
     snprintf(self.name, sizeof(self.name), "%s", name);
@@ -418,21 +511,23 @@ SimpleESPNow::init(char *name) {
     broadcast.mac[5] = 0xFF;
     setPeerName(&broadcast, "Broadcast");
     // Init ESPNow
+    DBGLOG(Verbose, "Init NetIF");
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg =    WIFI_INIT_CONFIG_DEFAULT();
     cfg.static_rx_buf_num =     this->static_rx_buf_num;   // War 8
     cfg.dynamic_rx_buf_num =    this->dynamic_rx_buf_num;  // War 32
     cfg.static_tx_buf_num =     this->static_tx_buf_num;   // War 8
-
+    DBGLOG(Verbose, "Init WiFi");
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
     ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE) );
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_channel(this->channel, WIFI_SECOND_CHAN_NONE));
-
+    DBGLOG(Verbose, "Init ESPNow");
     esp_now_init();
     // Register callback
+    DBGLOG(Verbose, "register callbacks");
     esp_now_register_recv_cb(SimpleESPNowRecvCallback);
     esp_now_register_send_cb(SimpleESPNowSendCallback);
     initialized = true;

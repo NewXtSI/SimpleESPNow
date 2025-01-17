@@ -3,13 +3,15 @@
 
 #include <Arduino.h>
 #include <esp_now.h>
+#include <vector>
 
 #define MAX_MESSAGES_IN_QUEUE    20
+#define MAX_MSG_LEN              (ESP_NOW_MAX_DATA_LEN - 100)
 
 class SimpleESPNowPeer {
  public:
     uint8_t             mac[6] = {0, 0, 0, 0, 0, 0};
-    char                name[16] = {'\0'};
+    char                name[10] = {'\0'};
     uint32_t            lastSeen = 0;
  private:
 };
@@ -18,7 +20,7 @@ class SimpleESPPlatformMsg {
  public:
     uint8_t             mac[6];
     uint16_t            msgID;
-    uint8_t             data[ESP_NOW_MAX_DATA_LEN];
+    uint8_t             data[MAX_MSG_LEN];
     int                 dataLen;
     bool                waitingForAck = false;
     uint32_t            timeStamp;
@@ -82,7 +84,9 @@ class SimpleESPNow {
     void                sendPing(SimpleESPNowPeer *peer);
     void                checkTimeSync();
     void                checkPeers();      
+    void                dumpQueue();
 };
+
 
 extern SimpleESPNow simpleESPNow;
 
